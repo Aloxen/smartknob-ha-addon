@@ -284,8 +284,18 @@ def create_app() -> web.Application:
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
     os.makedirs(static_dir, exist_ok=True)
 
-    async def index_handler(request: web.Request) -> web.FileResponse:
-        return web.FileResponse(os.path.join(static_dir, "index.html"))
+    async def index_handler(request: web.Request) -> web.Response:
+        ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+        index_file = os.path.join(static_dir, "index.html")
+        with open(index_file, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        if ingress_path:
+            base_tag = f'<base href="{ingress_path}/">'
+            if "<head>" in html:
+                html = html.replace("<head>", f"<head>\n  {base_tag}")
+
+        return web.Response(text=html, content_type="text/html")
 
     async def style_handler(request: web.Request) -> web.FileResponse:
         return web.FileResponse(os.path.join(static_dir, "style.css"))
@@ -296,12 +306,19 @@ def create_app() -> web.Application:
     async def favicon_handler(request: web.Request) -> web.Response:
         return web.Response(status=204)
 
+    async def catch_all_handler(request: web.Request) -> web.StreamResponse:
+        path = request.match_info.get("tail", "")
+        filepath = os.path.join(static_dir, path)
+        if path and os.path.isfile(filepath):
+            return web.FileResponse(filepath)
+        return await index_handler(request)
+
     app.router.add_get("/", index_handler)
     app.router.add_get("/index.html", index_handler)
     app.router.add_get("/style.css", style_handler)
     app.router.add_get("/app.js", app_js_handler)
     app.router.add_get("/favicon.ico", favicon_handler)
-    app.router.add_static("/static", static_dir)
+    app.router.add_get("/{tail:.*}", catch_all_handler)
 
     return app
 
