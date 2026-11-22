@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartKnob Studio</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="logo-group">
+        <div class="knob-icon-wrapper">
+          <i class="mdi mdi-knob"></i>
+        </div>
+        <div>
+          <h1>SmartKnob Studio</h1>
+          <span class="subtext">Visueller Menü- & Screen-Builder</span>
+        </div>
+      </div>
+
+      <div class="device-selector-group">
+        <label for="deviceSelect">Gerät:</label>
+        <select id="deviceSelect"></select>
+        <button id="btnNewDevice" class="btn btn-secondary" title="Neues SmartKnob-Gerät anlegen">
+          <i class="mdi mdi-plus"></i> Neu
+        </button>
+      </div>
+
+      <div class="actions-group">
+        <button id="btnViewYaml" class="btn btn-secondary">
+          <i class="mdi mdi-code-braces"></i> YAML
+        </button>
+        <button id="btnSave" class="btn btn-primary">
+          <i class="mdi mdi-content-save"></i> Speichern
+        </button>
+        <button id="btnPush" class="btn btn-accent">
+          <i class="mdi mdi-send"></i> An Knob senden
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Left Panel: Menu Tree -->
+      <section class="panel panel-left">
+        <div class="panel-header">
+          <div class="breadcrumbs" id="breadcrumbs">
+            <span class="crumb active" data-path="">🏠 Hauptmenü</span>
+          </div>
+          <button id="btnAddItem" class="btn btn-small btn-primary">
+            <i class="mdi mdi-plus"></i> Element hinzufügen
+          </button>
+        </div>
+
+        <div class="item-list-container" id="itemList">
+          <!-- Dynamic Items inserted here -->
+        </div>
+      </section>
+
+      <!-- Center Panel: Item Inspector -->
+      <section class="panel panel-center" id="inspectorPanel">
+        <div class="panel-header">
+          <h2><i class="mdi mdi-tune"></i> Eigenschaften</h2>
+          <span class="badge" id="inspectorBadge">Screen</span>
+        </div>
+
+        <div class="inspector-content" id="inspectorContent">
+          <div class="empty-state">
+            <i class="mdi mdi-cursor-default-click-outline"></i>
+            <p>Wähle links ein Element aus oder klicke auf <strong>+ Element hinzufügen</strong>.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Live 240x240 Display Simulator -->
+      <section class="panel panel-right">
+        <div class="panel-header">
+          <h2><i class="mdi mdi-monitor-eye"></i> Display-Vorschau</h2>
+          <span class="badge badge-dim">240 × 240 px</span>
+        </div>
+
+        <div class="display-container">
+          <div class="knob-bezel">
+            <canvas id="displayCanvas" width="240" height="240"></canvas>
+          </div>
+          <div class="simulator-controls">
+            <span id="displayScreenName">Menü-Ansicht</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal: Add Item Type Chooser -->
+    <div class="modal-overlay" id="addModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Neues Element hinzufügen</h3>
+          <button class="modal-close" id="closeAddModal">&times;</button>
+        </div>
+        <div class="type-cards">
+          <div class="type-card" data-type="screen" data-screen="brightness">
+            <div class="type-card-icon" style="background: rgba(255, 170, 0, 0.2); color: #FFAA00;">
+              <i class="mdi mdi-lightbulb-on"></i>
+            </div>
+            <h4>Licht / Helligkeit</h4>
+            <p>0–100% Helligkeitskreis, Farbanzeige und optionale Presets für Lampen & WLED.</p>
+          </div>
+
+          <div class="type-card" data-type="screen" data-screen="switch">
+            <div class="type-card-icon" style="background: rgba(0, 204, 136, 0.2); color: #00CC88;">
+              <i class="mdi mdi-power"></i>
+            </div>
+            <h4>Schalter / Steckdose</h4>
+            <p>Großer AN/AUS Schalter mit optionaler Watt-Anzeige und Abschaltschutz.</p>
+          </div>
+
+          <div class="type-card" data-type="screen" data-screen="info">
+            <div class="type-card-icon" style="background: rgba(0, 204, 255, 0.2); color: #00CCFF;">
+              <i class="mdi mdi-chart-bell-curve-cumulative"></i>
+            </div>
+            <h4>Info-Screen</h4>
+            <p>Zeigt Messwerte, Tacho-Anzeigen oder 24h-Diagramme. Blättern durch Drehen.</p>
+          </div>
+
+          <div class="type-card" data-type="submenu">
+            <div class="type-card-icon" style="background: rgba(187, 102, 255, 0.2); color: #BB66FF;">
+              <i class="mdi mdi-folder-outline"></i>
+            </div>
+            <h4>Untermenü</h4>
+            <p>Erstellt einen Ordner (z. B. "Wohnzimmer"), in den du weitere Elemente legen kannst.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Raw YAML Editor -->
+    <div class="modal-overlay" id="yamlModal">
+      <div class="modal modal-large">
+        <div class="modal-header">
+          <h3>YAML-Konfiguration bearbeiten</h3>
+          <button class="modal-close" id="closeYamlModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <textarea id="yamlEditorText" spellcheck="false"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button id="btnCancelYaml" class="btn btn-secondary">Abbrechen</button>
+          <button id="btnApplyYaml" class="btn btn-primary">Übernehmen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
