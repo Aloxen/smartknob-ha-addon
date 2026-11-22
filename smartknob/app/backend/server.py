@@ -283,7 +283,25 @@ def create_app() -> web.Application:
     # Static frontend files
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
     os.makedirs(static_dir, exist_ok=True)
-    app.router.add_static("/", static_dir, show_index=True)
+
+    async def index_handler(request: web.Request) -> web.FileResponse:
+        return web.FileResponse(os.path.join(static_dir, "index.html"))
+
+    async def style_handler(request: web.Request) -> web.FileResponse:
+        return web.FileResponse(os.path.join(static_dir, "style.css"))
+
+    async def app_js_handler(request: web.Request) -> web.FileResponse:
+        return web.FileResponse(os.path.join(static_dir, "app.js"))
+
+    async def favicon_handler(request: web.Request) -> web.Response:
+        return web.Response(status=204)
+
+    app.router.add_get("/", index_handler)
+    app.router.add_get("/index.html", index_handler)
+    app.router.add_get("/style.css", style_handler)
+    app.router.add_get("/app.js", app_js_handler)
+    app.router.add_get("/favicon.ico", favicon_handler)
+    app.router.add_static("/static", static_dir)
 
     return app
 
