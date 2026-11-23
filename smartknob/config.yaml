@@ -1,6 +1,6 @@
 name: "SmartKnob Studio"
 description: "Visueller Menü- und Screen-Builder für SmartKnob"
-version: "1.0.2"
+version: "1.0.3"
 slug: "smartknob_studio"
 init: false
 arch:
