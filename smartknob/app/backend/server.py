@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import base64
 import glob
 import json
 import logging
 import os
 import re
+import struct
 from aiohttp import ClientSession, web
 import yaml
 
@@ -118,6 +120,126 @@ async def get_entities_from_ha() -> list[dict]:
         logger.error("Error communicating with Home Assistant: %s", ex)
 
     return []
+
+
+# ── Binary Config Encoding ──────────────────────────────────────────────────
+
+SCREEN_MARKER = 0x01
+TYPE_LIGHT  = 0x01
+TYPE_SWITCH = 0x02
+TYPE_ENERGY = 0x03
+TYPE_INFO   = 0x04
+TYPE_MENU   = 0x05
+
+ICON_MAP = {
+    "lightbulb": 1, "power": 2, "dashboard": 3, "brightness": 4,
+    "preset": 5, "plug": 6, "gear": 7, "home": 8, "circle": 9,
+}
+
+def _str_b(s: str) -> bytes:
+    """Length-prefixed string: 1 byte len + UTF-8 bytes."""
+    b = (s or "").encode("utf-8")[:255]
+    return bytes([len(b)]) + b
+
+def _rgb565(hex_color: str) -> bytes:
+    """#RRGGBB → 2 bytes RGB565 Big-Endian."""
+    h = (hex_color or "#FFFFFF").lstrip("#")
+    if len(h) < 6:
+        return b"\xFF\xFF"
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+        return struct.pack(">H", rgb565)
+    except Exception:
+        return b"\xFF\xFF"
+
+def _encode_screen(item: dict) -> bytes | None:
+    """Encode one menu item into binary."""
+    screen = item.get("screen", "")
+    opts   = item.get("options") or {}
+    color  = item.get("color", "#FFFFFF")
+    entity = item.get("entity_id", "")
+
+    if item.get("type") == "submenu":
+        children = item.get("children", [])
+        child_bytes = b""
+        child_count = 0
+        for child in children:
+            enc = _encode_screen(child)
+            if enc:
+                child_bytes += enc
+                child_count += 1
+        icon = ICON_MAP.get(item.get("icon", "circle"), 9)
+        return (bytes([SCREEN_MARKER, TYPE_MENU, icon])
+                + _rgb565(color)
+                + _str_b(item.get("label", ""))
+                + bytes([child_count])
+                + child_bytes)
+
+    elif screen == "brightness":
+        presets = opts.get("presets", [])
+        flags = 0x01 if presets else 0x00
+        payload = bytes([SCREEN_MARKER, TYPE_LIGHT, flags]) + _rgb565(color) + _str_b(entity)
+        payload += bytes([len(presets)])
+        for p in presets:
+            payload += _str_b(p.get("label", ""))
+            payload += _str_b(p.get("preset", p.get("label", "")))
+            payload += _rgb565(p.get("color", "#FFFFFF"))
+        return payload
+
+    elif screen == "switch":
+        icon = ICON_MAP.get(item.get("icon", "power"), 2)
+        power_sensor = opts.get("power_sensor", "")
+        threshold    = opts.get("power_threshold", 0)
+        return (bytes([SCREEN_MARKER, TYPE_SWITCH, icon])
+                + _rgb565(color)
+                + _str_b(entity)
+                + _str_b(power_sensor)
+                + struct.pack(">H", int(threshold))
+                + _str_b(item.get("label", "")))
+
+    elif screen == "info":
+        items = opts.get("items", [])
+        payload = bytes([SCREEN_MARKER, TYPE_INFO]) + _rgb565(color) + bytes([len(items)])
+        for it in items:
+            it_type = {"value": 0, "gauge": 1, "chart": 2}.get(it.get("type", "value"), 0)
+            payload += (bytes([it_type])
+                        + _str_b(it.get("entity_id", ""))
+                        + _str_b(it.get("label", ""))
+                        + _str_b(it.get("unit", ""))
+                        + struct.pack(">HH", int(it.get("min", 0)), int(it.get("max", 100))))
+        return payload
+
+    return None
+
+def encode_binary_config(config_obj: dict) -> bytes:
+    """Encode menu tree to binary format."""
+    menu = config_obj.get("menu", [])
+    payload = b""
+    for item in menu:
+        enc = _encode_screen(item)
+        if enc:
+            payload += enc
+    if len(payload) > 255:
+        logger.warning("Binary config size exceeds 255 bytes (%d), truncating", len(payload))
+    len_byte = min(len(payload), 255)
+    return bytes([len_byte]) + payload[:len_byte]
+
+
+async def push_binary_config(config_obj: dict, device_ip: str, device_name: str) -> bool:
+    try:
+        binary = encode_binary_config(config_obj)
+        b64 = base64.b64encode(binary).decode("ascii")
+        event_data = {
+            "device_name": device_name,
+            "device_ip": device_ip,
+            "config_b64": b64,
+            "config_len": len(binary),
+        }
+        return await fire_ha_event("smartknob_config_bin", event_data)
+    except Exception as ex:
+        logger.error("Failed to encode/push binary config: %s", ex)
+        return False
 
 
 def transform_menu_for_firmware(menu: list) -> list:
@@ -276,15 +398,22 @@ async def api_save_config(request: web.Request) -> web.Response:
     pushed = False
     if push and config_obj:
         dev = config_obj.get("device", {})
-        # Transform studio format → firmware-ready format before pushing
+        device_name = dev.get("name", "SmartKnob")
+        device_ip = dev.get("ip", "")
+
+        # 1. Push binary format
+        pushed_bin = await push_binary_config(config_obj, device_ip, device_name)
+
+        # 2. Also push legacy JSON format for backwards compatibility
         fw_config = dict(config_obj)
         fw_config["menu"] = transform_menu_for_firmware(config_obj.get("menu", []))
         event_data = {
-            "device_name": dev.get("name", "SmartKnob"),
-            "device_ip": dev.get("ip", ""),
+            "device_name": device_name,
+            "device_ip": device_ip,
             "config": fw_config,
         }
-        pushed = await fire_ha_event("smartknob_config", event_data)
+        pushed_json = await fire_ha_event("smartknob_config", event_data)
+        pushed = pushed_bin or pushed_json
 
     return web.json_response({
         "status": "saved",
@@ -307,14 +436,20 @@ async def api_push_config(request: web.Request) -> web.Response:
 
     config_obj = data.get("smartknob", data)
     dev = config_obj.get("device", {})
+    device_name = dev.get("name", "SmartKnob")
+    device_ip = dev.get("ip", "")
+
+    # Push both binary and JSON
+    pushed_bin = await push_binary_config(config_obj, device_ip, device_name)
     fw_config = dict(config_obj)
     fw_config["menu"] = transform_menu_for_firmware(config_obj.get("menu", []))
     event_data = {
-        "device_name": dev.get("name", "SmartKnob"),
-        "device_ip": dev.get("ip", ""),
+        "device_name": device_name,
+        "device_ip": device_ip,
         "config": fw_config,
     }
-    pushed = await fire_ha_event("smartknob_config", event_data)
+    pushed_json = await fire_ha_event("smartknob_config", event_data)
+    pushed = pushed_bin or pushed_json
     return web.json_response({"status": "ok", "pushed": pushed})
 
 
