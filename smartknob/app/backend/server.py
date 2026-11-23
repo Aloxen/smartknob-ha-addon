@@ -130,6 +130,7 @@ TYPE_SWITCH = 0x02
 TYPE_ENERGY = 0x03
 TYPE_INFO   = 0x04
 TYPE_MENU   = 0x05
+TYPE_PRESET = 0x06
 
 ICON_MAP = {
     "lightbulb": 1, "power": 2, "dashboard": 3, "brightness": 4,
@@ -179,13 +180,23 @@ def _encode_screen(item: dict) -> bytes | None:
     elif screen == "brightness":
         presets = opts.get("presets", [])
         flags = 0x01 if presets else 0x00
-        payload = bytes([SCREEN_MARKER, TYPE_LIGHT, flags]) + _rgb565(color) + _str_b(entity)
+        payload = (bytes([SCREEN_MARKER, TYPE_LIGHT, flags])
+                   + _rgb565(color)
+                   + _str_b(entity)
+                   + _str_b(item.get("label", "")))
         payload += bytes([len(presets)])
         for p in presets:
             payload += _str_b(p.get("label", ""))
             payload += _str_b(p.get("preset", p.get("label", "")))
             payload += _rgb565(p.get("color", "#FFFFFF"))
         return payload
+
+    elif screen == "preset":
+        icon = ICON_MAP.get(item.get("icon", "preset"), 5)
+        return (bytes([SCREEN_MARKER, TYPE_PRESET, icon])
+                + _rgb565(color)
+                + _str_b(entity)
+                + _str_b(item.get("label", "")))
 
     elif screen == "switch":
         icon = ICON_MAP.get(item.get("icon", "power"), 2)
@@ -213,17 +224,16 @@ def _encode_screen(item: dict) -> bytes | None:
     return None
 
 def encode_binary_config(config_obj: dict) -> bytes:
-    """Encode menu tree to binary format."""
+    """Encode menu tree to binary format with magic header b'SK\\x02' and 16-bit length."""
     menu = config_obj.get("menu", [])
     payload = b""
     for item in menu:
         enc = _encode_screen(item)
         if enc:
             payload += enc
-    if len(payload) > 255:
-        logger.warning("Binary config size exceeds 255 bytes (%d), truncating", len(payload))
-    len_byte = min(len(payload), 255)
-    return bytes([len_byte]) + payload[:len_byte]
+    # Magic header: b'SK' + version 0x02 + uint16 big-endian payload length
+    header = b"SK\x02" + struct.pack(">H", len(payload))
+    return header + payload
 
 
 async def push_binary_config(config_obj: dict, device_ip: str, device_name: str) -> bool:
