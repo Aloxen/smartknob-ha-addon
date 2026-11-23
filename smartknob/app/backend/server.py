@@ -81,6 +81,8 @@ async def get_entities_from_ha() -> list[dict]:
             {"entity_id": "sensor.energie_heute", "domain": "sensor", "friendly_name": "Energie Heute", "state": "4.8", "unit": "kWh"},
             {"entity_id": "sensor.stehlampe_power", "domain": "sensor", "friendly_name": "Stehlampe Leistung", "state": "24.0", "unit": "W"},
             {"entity_id": "sensor.schreibtisch_power", "domain": "sensor", "friendly_name": "Schreibtisch Leistung", "state": "85.2", "unit": "W"},
+            {"entity_id": "select.gaming_preset", "domain": "select", "friendly_name": "Gaming Voreinstellung", "state": "Gaming", "options": ["2 Presets test", "Blue Android", "FaceCam", "PinkGaming", "Warm Pc Only", "Warm2 friendly"]},
+            {"entity_id": "input_select.wohnzimmer_scene", "domain": "input_select", "friendly_name": "Wohnzimmer Szene", "state": "Entspannung", "options": ["Entspannung", "Film", "Party", "Hell"]},
         ]
 
     headers = {
@@ -96,15 +98,19 @@ async def get_entities_from_ha() -> list[dict]:
                     for item in data:
                         eid = item.get("entity_id", "")
                         domain = eid.split(".")[0] if "." in eid else ""
-                        if domain in ("light", "switch", "sensor", "binary_sensor", "climate", "media_player"):
+                        if domain in ("light", "switch", "sensor", "binary_sensor", "climate", "media_player", "select", "input_select"):
                             attrs = item.get("attributes", {})
-                            result.append({
+                            entry = {
                                 "entity_id": eid,
                                 "domain": domain,
                                 "friendly_name": attrs.get("friendly_name", eid),
                                 "state": item.get("state", ""),
                                 "unit": attrs.get("unit_of_measurement", ""),
-                            })
+                            }
+                            # Include options list for select / input_select entities
+                            if domain in ("select", "input_select") and "options" in attrs:
+                                entry["options"] = attrs["options"]
+                            result.append(entry)
                     return sorted(result, key=lambda x: (x["domain"], x["friendly_name"]))
                 else:
                     logger.warning("Failed to fetch states from HA API, code: %d", resp.status)
@@ -112,6 +118,49 @@ async def get_entities_from_ha() -> list[dict]:
         logger.error("Error communicating with Home Assistant: %s", ex)
 
     return []
+
+
+def transform_menu_for_firmware(menu: list) -> list:
+    """Convert Studio's nested options format to firmware-ready flat format.
+
+    Studio stores:  item.options.power_sensor, item.options.power_threshold
+    Firmware reads: item.power_sensor_id,       item.power_threshold_watts
+
+    Also flattens preset options list to a simple string array.
+    """
+    out = []
+    for item in (menu or []):
+        it = dict(item)
+        opts = it.get("options") or {}
+
+        if it.get("screen") == "switch":
+            power_sensor = opts.get("power_sensor") or opts.get("power_sensor_id") or ""
+            power_threshold = opts.get("power_threshold") or opts.get("power_threshold_watts") or 0
+            if power_sensor:
+                it["power_sensor_id"] = power_sensor
+            it["power_threshold_watts"] = float(power_threshold)
+            it.pop("options", None)
+
+        elif it.get("screen") == "preset":
+            # Keep options as a flat list of label strings
+            preset_opts = opts.get("options", [])
+            if isinstance(preset_opts, list) and preset_opts:
+                it["options"] = [
+                    o if isinstance(o, str) else o.get("label", str(o))
+                    for o in preset_opts
+                ]
+            # else leave options as-is (may already be a list of strings)
+
+        elif it.get("screen") == "info":
+            # Pass through as-is (firmware reads nested items directly)
+            pass
+
+        # Recurse into submenus
+        if it.get("type") == "submenu" and it.get("children"):
+            it["children"] = transform_menu_for_firmware(it["children"])
+
+        out.append(it)
+    return out
 
 
 async def fire_ha_event(event_type: str, data: dict) -> bool:
@@ -227,10 +276,13 @@ async def api_save_config(request: web.Request) -> web.Response:
     pushed = False
     if push and config_obj:
         dev = config_obj.get("device", {})
+        # Transform studio format → firmware-ready format before pushing
+        fw_config = dict(config_obj)
+        fw_config["menu"] = transform_menu_for_firmware(config_obj.get("menu", []))
         event_data = {
             "device_name": dev.get("name", "SmartKnob"),
             "device_ip": dev.get("ip", ""),
-            "config": config_obj,
+            "config": fw_config,
         }
         pushed = await fire_ha_event("smartknob_config", event_data)
 
@@ -255,10 +307,12 @@ async def api_push_config(request: web.Request) -> web.Response:
 
     config_obj = data.get("smartknob", data)
     dev = config_obj.get("device", {})
+    fw_config = dict(config_obj)
+    fw_config["menu"] = transform_menu_for_firmware(config_obj.get("menu", []))
     event_data = {
         "device_name": dev.get("name", "SmartKnob"),
         "device_ip": dev.get("ip", ""),
-        "config": config_obj,
+        "config": fw_config,
     }
     pushed = await fire_ha_event("smartknob_config", event_data)
     return web.json_response({"status": "ok", "pushed": pushed})

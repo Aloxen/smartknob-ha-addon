@@ -248,10 +248,69 @@ function renderItemList() {
     } else if (item.screen === "switch") {
       subtext = item.entity_id || "Keine Entity";
       badgeText = "Schalter";
-    } else if (item.screen === "info") {
+    } else if (item.screen === "preset") {
+    const presetOpts = (item.options && item.options.options) ? item.options.options : [];
+    // Find the entity's available options from the loaded HA entities list
+    const entState = STATE.entities.find(e => e.entity_id === item.entity_id);
+    const availableOptions = entState && entState.options ? entState.options : [];
+
+    let optRows = presetOpts.map((opt, i) => `
+      <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+        <input type="text" class="form-control inp-preset-opt" data-idx="${i}" value="${escapeHtml(opt)}" style="flex:1;">
+        <button class="btn-icon danger btn-del-preset" data-idx="${i}"><i class="mdi mdi-close"></i></button>
+      </div>
+    `).join("");
+
+    let availHtml = availableOptions.length > 0 ? `
+      <div style="margin-top:8px; font-size:12px; color:var(--text-dim);">
+        Verfügbare Optionen aus HA:
+        <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+          ${availableOptions.map(o => `
+            <button class="btn btn-small btn-secondary btn-add-available-preset"
+                    data-opt="${escapeHtml(o)}" style="font-size:11px; padding:2px 8px;">${escapeHtml(o)}</button>
+          `).join("")}
+        </div>
+        <button id="btnAddAllPresets" class="btn btn-small btn-secondary" style="margin-top:6px; width:100%;">
+          <i class="mdi mdi-playlist-plus"></i> Alle hinzufügen
+        </button>
+      </div>
+    ` : `<div style="font-size:11px; color:var(--text-dim); margin-top:8px;">
+           Lade Entität um Optionen zu sehen, oder füge manuell hinzu.
+         </div>`;
+
+    customHtml = `
+      <div class="form-section">
+        <div class="form-section-title">🎨 Preset-Auswahl Einstellungen</div>
+        <div class="form-row">
+          <label>Preset-Entity (select.* oder input_select.*):</label>
+          ${renderEntitySelector(item.entity_id || "", "select", (val) => {
+            item.entity_id = val;
+            renderItemList();
+            renderInspector();
+            drawDisplayCanvas();
+          }, "input_select")}
+        </div>
+        <div class="form-row">
+          <label>Verfügbare Presets (werden am Knob angezeigt):</label>
+          <div id="presetOptList">${optRows}</div>
+          <button id="btnAddPresetOpt" class="btn btn-small btn-secondary" style="width:100%; margin-top:6px;">
+            <i class="mdi mdi-plus"></i> Preset manuell hinzufügen
+          </button>
+          ${availHtml}
+        </div>
+        <div style="font-size:11px; color:var(--text-dim); margin-top:4px;">
+          💡 Tipp: Lasse die Liste leer damit der Knob die Optionen direkt aus HA liest.
+        </div>
+      </div>
+    `;
+  } else if (item.screen === "info") {
       const itemsCount = item.options && item.options.items ? item.options.items.length : 0;
       subtext = `${itemsCount} Info-Item(s)`;
       badgeText = "Info";
+    } else if (item.screen === "preset") {
+      subtext = item.entity_id || "Keine Entity";
+      const optCount = item.options && item.options.options ? item.options.options.length : 0;
+      badgeText = optCount > 0 ? `Preset (${optCount} Opt.)` : "Preset";
     }
 
     card.innerHTML = `
@@ -365,6 +424,18 @@ function addNewItem(type, screen) {
         power_threshold: 0,
       },
     };
+  } else if (screen === "preset") {
+    newItem = {
+      label: "Gaming Preset",
+      icon: "preset",
+      color: "#BB66FF",
+      type: "screen",
+      screen: "preset",
+      entity_id: "select.gaming_preset",
+      options: {
+        options: [], // will be populated from HA entity state at runtime
+      },
+    };
   } else if (screen === "info") {
     newItem = {
       label: "Energie",
@@ -448,6 +519,61 @@ function renderInspector() {
         <div class="form-row">
           <label>Abschaltwarnung ab Watt (0 = deaktiviert):</label>
           <input type="number" class="form-control" id="inpPowerThreshold" value="${item.options?.power_threshold || 0}">
+        </div>
+      </div>
+    `;
+  } else if (item.screen === "preset") {
+    const presetOpts = (item.options && item.options.options) ? item.options.options : [];
+    // Find the entity's available options from the loaded HA entities list
+    const entState = STATE.entities.find(e => e.entity_id === item.entity_id);
+    const availableOptions = entState && entState.options ? entState.options : [];
+
+    let optRows = presetOpts.map((opt, i) => `
+      <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+        <input type="text" class="form-control inp-preset-opt" data-idx="${i}" value="${escapeHtml(opt)}" style="flex:1;">
+        <button class="btn-icon danger btn-del-preset" data-idx="${i}"><i class="mdi mdi-close"></i></button>
+      </div>
+    `).join("");
+
+    let availHtml = availableOptions.length > 0 ? `
+      <div style="margin-top:8px; font-size:12px; color:var(--text-dim);">
+        Verfügbare Optionen aus HA:
+        <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+          ${availableOptions.map(o => `
+            <button class="btn btn-small btn-secondary btn-add-available-preset"
+                    data-opt="${escapeHtml(o)}" style="font-size:11px; padding:2px 8px;">${escapeHtml(o)}</button>
+          `).join("")}
+        </div>
+        <button id="btnAddAllPresets" class="btn btn-small btn-secondary" style="margin-top:6px; width:100%;">
+          <i class="mdi mdi-playlist-plus"></i> Alle hinzufügen
+        </button>
+      </div>
+    ` : `<div style="font-size:11px; color:var(--text-dim); margin-top:8px;">
+           Lade Entität um Optionen zu sehen, oder füge manuell hinzu.
+         </div>`;
+
+    customHtml = `
+      <div class="form-section">
+        <div class="form-section-title">🎨 Preset-Auswahl Einstellungen</div>
+        <div class="form-row">
+          <label>Preset-Entity (select.* oder input_select.*):</label>
+          ${renderEntitySelector(item.entity_id || "", "select", (val) => {
+            item.entity_id = val;
+            renderItemList();
+            renderInspector();
+            drawDisplayCanvas();
+          }, "input_select")}
+        </div>
+        <div class="form-row">
+          <label>Verfügbare Presets (werden am Knob angezeigt):</label>
+          <div id="presetOptList">${optRows}</div>
+          <button id="btnAddPresetOpt" class="btn btn-small btn-secondary" style="width:100%; margin-top:6px;">
+            <i class="mdi mdi-plus"></i> Preset manuell hinzufügen
+          </button>
+          ${availHtml}
+        </div>
+        <div style="font-size:11px; color:var(--text-dim); margin-top:4px;">
+          💡 Tipp: Lasse die Liste leer damit der Knob die Optionen direkt aus HA liest.
         </div>
       </div>
     `;
@@ -585,6 +711,51 @@ function renderInspector() {
     });
   }
 
+  // Preset specific
+  const btnAddPresetOpt = document.getElementById("btnAddPresetOpt");
+  if (btnAddPresetOpt) {
+    btnAddPresetOpt.addEventListener("click", () => {
+      if (!item.options) item.options = {};
+      if (!item.options.options) item.options.options = [];
+      item.options.options.push("Neues Preset");
+      renderInspector();
+    });
+  }
+  const btnAddAllPresets = document.getElementById("btnAddAllPresets");
+  if (btnAddAllPresets) {
+    btnAddAllPresets.addEventListener("click", () => {
+      const entState = STATE.entities.find(e => e.entity_id === item.entity_id);
+      const available = entState && entState.options ? entState.options : [];
+      if (!item.options) item.options = {};
+      item.options.options = [...available];
+      renderInspector();
+    });
+  }
+  container.querySelectorAll(".btn-add-available-preset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!item.options) item.options = {};
+      if (!item.options.options) item.options.options = [];
+      const opt = btn.dataset.opt;
+      if (!item.options.options.includes(opt)) {
+        item.options.options.push(opt);
+        renderInspector();
+      }
+    });
+  });
+  container.querySelectorAll(".inp-preset-opt").forEach((inp) => {
+    inp.addEventListener("input", (e) => {
+      const idx = parseInt(inp.dataset.idx);
+      item.options.options[idx] = e.target.value;
+    });
+  });
+  container.querySelectorAll(".btn-del-preset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.idx);
+      item.options.options.splice(idx, 1);
+      renderInspector();
+    });
+  });
+
   // Info specific
   const btnAddInfo = document.getElementById("btnAddInfoItem");
   if (btnAddInfo) {
@@ -638,8 +809,10 @@ function renderInspector() {
   });
 }
 
-function renderEntitySelector(currentValue, filterDomain, onSelect) {
-  const filtered = STATE.entities.filter((e) => !filterDomain || e.domain === filterDomain);
+function renderEntitySelector(currentValue, filterDomain, onSelect, filterDomain2 = null) {
+  const filtered = STATE.entities.filter((e) =>
+    !filterDomain || e.domain === filterDomain || (filterDomain2 && e.domain === filterDomain2)
+  );
   const optionsHtml = filtered.map((e) => `
     <option value="${e.entity_id}" ${e.entity_id === currentValue ? "selected" : ""}>
       ${e.friendly_name} (${e.entity_id})
